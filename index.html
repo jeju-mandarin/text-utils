@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실시간 글자 수 / 바이트 세기</title>
+    <style>
+        /* (기본 스타일 ... ) */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            min-height: 100vh;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 20px 0;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 25px 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+            width: 90%;
+            max-width: 600px;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 1.6rem;
+        }
+        textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            font-family: inherit;
+            resize: vertical;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 10px 20px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: 15px;
+        }
+        button:hover {
+            background-color: #5a6268;
+        }
+        .results-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr; /* 2열 그리드 */
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .result-box {
+            background-color: #f9f9f9;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 15px 20px;
+            text-align: center;
+        }
+        .result-box .label {
+            display: block;
+            font-size: 0.9rem;
+            color: #555;
+            margin-bottom: 5px;
+        }
+        .result-box .value {
+            display: block;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #007bff;
+        }
+
+        /* [수정] 읽기/경과 시간 값 폰트 및 줄간격 조절 */
+        .result-box .value.time-box {
+            font-size: 1.2rem; /* 폰트 크기 조절 */
+            line-height: 1.4; /* 줄 간격 추가 */
+        }
+        /* [추가] 경과 시간 텍스트 스타일 */
+        #elapsed-time {
+            font-size: 1.0rem;
+            color: #777;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>⌨️ 실시간 글자 수 / 바이트 세기</h1>
+        
+        <textarea id="text-input" placeholder="여기에 텍스트를 입력하거나 붙여넣으세요..."></textarea>
+        
+        <button id="reset-btn">초기화</button>
+
+        <div class="results-grid">
+            <div class="result-box">
+                <span class="label">글자 수 (공백 포함)</span>
+                <span class="value" id="char-count">0</span>
+            </div>
+            <div class="result-box">
+                <span class="label">글자 수 (공백 제외)</span>
+                <span class="value" id="char-count-nospace">0</span>
+            </div>
+            <div class="result-box">
+                <span class="label">Byte (UTF-8)</span>
+                <span class="value" id="byte-count-utf8">0</span>
+            </div>
+            <div class="result-box">
+                <span class="label">단어 수</span>
+                <span class="value" id="word-count">0</span>
+            </div>
+            <div class="result-box">
+                <span class="label">줄 수</span>
+                <span class="value" id="line-count">0</span>
+            </div>
+            
+            <div class="result-box">
+                <span class="label">예상 / 경과 시간</span>
+                <span class="value time-box">
+                    <span id="estimated-time">약 0분 0초</span>
+                    <br>
+                    <span id="elapsed-time">(경과: 0분 0초)</span>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- [수정] JavaScript 로직 (타이머 기능 추가) ---
+        
+        // 1. 필요한 HTML 요소들 선택
+        const textInput = document.getElementById('text-input');
+        const resetBtn = document.getElementById('reset-btn');
+        
+        const charCountEl = document.getElementById('char-count');
+        const charCountNoSpaceEl = document.getElementById('char-count-nospace');
+        const wordCountEl = document.getElementById('word-count');
+        const lineCountEl = document.getElementById('line-count');
+        const byteCountUtf8El = document.getElementById('byte-count-utf8');
+        
+        // [수정] 시간 표시 요소 ID 변경
+        const estimatedTimeEl = document.getElementById('estimated-time');
+        const elapsedTimeEl = document.getElementById('elapsed-time');
+
+        // [추가] 타이머 상태 변수
+        let startTime = null;
+        let timerInterval = null;
+        let isTypingStarted = false;
+
+        // 2. 카운트 업데이트 함수
+        function updateCounts() {
+            
+            // [추가] 첫 입력 시 타이머 시작
+            if (!isTypingStarted) {
+                isTypingStarted = true;
+                startTime = new Date(); // 현재 시간 저장
+
+                // 1초마다 경과 시간 업데이트
+                timerInterval = setInterval(() => {
+                    if (!startTime) return; // (초기화된 경우 대비)
+
+                    const now = new Date();
+                    const diff = now.getTime() - startTime.getTime(); // ms 차이
+                    
+                    const totalSeconds = Math.floor(diff / 1000);
+                    const minutes = Math.floor(totalSeconds / 60);
+                    const seconds = totalSeconds % 60; // 60으로 나눈 나머지
+                    
+                    // 경과 시간 표시 (0초 패딩)
+                    elapsedTimeEl.textContent = `(경과: ${minutes}분 ${seconds < 10 ? '0' + seconds : seconds}초)`;
+
+                }, 1000);
+            }
+
+            // (이하 기존 통계 로직)
+            const text = textInput.value;
+
+            // 2-1. 글자 수 (공백 포함)
+            charCountEl.textContent = text.length;
+
+            // 2-2. 글자 수 (공백 제외)
+            const noSpaceText = text.replace(/\s/g, '');
+            charCountNoSpaceEl.textContent = noSpaceText.length;
+            
+            // 2-3. Byte (UTF-8)
+            try {
+                const utf8Bytes = new TextEncoder().encode(text).length;
+                byteCountUtf8El.textContent = utf8Bytes;
+            } catch (e) {
+                byteCountUtf8El.textContent = 'N/A';
+            }
+
+            // 2-4. 단어 수
+            const words = text.trim().split(/\s+/).filter(word => word.length > 0);
+            const wordCount = text.length === 0 ? 0 : words.length;
+            wordCountEl.textContent = wordCount;
+            
+            // 2-5. 줄 수
+            const lines = text.split('\n');
+            lineCountEl.textContent = text.length === 0 ? 0 : lines.length;
+
+            // 2-6. 예상 읽기 시간
+            const wpm = 250; 
+            const totalSeconds = (wordCount / wpm) * 60;
+            
+            if (totalSeconds === 0) {
+                estimatedTimeEl.textContent = '약 0분 0초';
+            } else {
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = Math.round(totalSeconds % 60);
+                estimatedTimeEl.textContent = `약 ${minutes}분 ${seconds < 10 ? '0' + seconds : seconds}초`;
+            }
+        }
+
+        // 3. 이벤트 리스너 연결
+        
+        textInput.addEventListener('input', updateCounts);
+        
+        // [수정] 초기화 버튼 클릭 시
+        resetBtn.addEventListener('click', function() {
+            textInput.value = ''; // 텍스트 지우기
+            updateCounts(); // 카운트 0으로 초기화
+            
+            // [추가] 타이머 및 상태 초기화
+            if (timerInterval) {
+                clearInterval(timerInterval); // 인터벌 중지
+            }
+            isTypingStarted = false;
+            startTime = null;
+            timerInterval = null;
+            elapsedTimeEl.textContent = '(경과: 0분 0초)'; // 표시 초기화
+        });
+    </script>
+
+</body>
+</html>
